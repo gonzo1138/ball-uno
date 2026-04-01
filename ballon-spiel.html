@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Ballon-Spiel</title>
+  <!--link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet"-->
+  <style>
+    * { 
+      box-sizing: border-box; 
+      margin: 0; 
+      padding: 0; 
+    }
+    body { 
+      overflow: hidden; 
+      background-color: DeepSkyBlue ; 
+      background-image: url("./wolken-hintergrundbild.jpg");
+      background-repeat: no-repeat;
+      background-position: 90% top;
+      background-color: rgb(241, 20, 216);
+      width: 100vw; 
+      height: 100vh; 
+      cursor: none;
+    }
+    .balloon { 
+      position: absolute; 
+      user-select: none; 
+      cursor: none;
+      pointer-events: none;
+    }
+    #counter {
+      position: fixed; 
+      top: 12px; 
+      left: 16px;
+      /*font-family: 'Bangers', sans-serif;*/
+      font-family: sans-serif;
+      font-size: 22px; 
+      letter-spacing: 1px;
+      color: midnightblue; 
+      opacity: 0.45;
+      line-height: 1.4; 
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="counter">flew: 0<br>fang: 0</div>
+<script>
+// === KONFIGURATION ===
+const BALLOON_COUNT = 20;    // max gleichzeitige Ballons
+const RISE_SPEED    = 50;  // Aufstiegsgeschwindigkeit px/s
+// =====================
+
+const W = 200, H = 300;   // dargestellte Ballongröße in px
+
+const COLORS = [
+  '#f114d8','#f08080','#ff6eb4','#c71585','#ff00ff',
+  //'#e76f51','#8338ec','#06d6a0','#ff006e','#3a86ff'
+];
+
+// Burst-Parameter
+const SPIKES  = 9;
+const OUTER_R = 155;
+const INNER_CP = 18;
+const POP_DURATION = 555;
+const CX = 340, CY = 210;
+
+let uid = 0;
+const balloons = new Map(); // uid → state
+let spawnTimer = 100;
+let lastTime   = null;
+let cFlew = 0, cFang = 0;
+
+function updateCounter() {
+  document.getElementById('counter').innerHTML = `flew: ${cFlew}<br>fang: ${cFang}`;
+}
+
+function randomColor() {
+  return COLORS[Math.floor(Math.random() * COLORS.length)];
+}
+
+function colorMix(base, target, pct) {
+  // Returns CSS color-mix string
+  return `color-mix(in srgb, ${base} ${pct}%, ${target})`;
+}
+
+function burstPath(p) {
+  const tips = Array.from({ length: SPIKES }, (_, i) => {
+    const a = (i / SPIKES) * Math.PI * 2 - Math.PI / 2;
+    return { x: CX + Math.cos(a) * OUTER_R * p, y: CY + Math.sin(a) * OUTER_R * p };
+  });
+  let d = `M${tips[0].x.toFixed(1)},${tips[0].y.toFixed(1)}`;
+  for (let i = 0; i < SPIKES; i++) {
+    const next = tips[(i + 1) % SPIKES];
+    const ma = ((i + 0.5) / SPIKES) * Math.PI * 2 - Math.PI / 2;
+    const cpx = (CX + Math.cos(ma) * INNER_CP * p).toFixed(1);
+    const cpy = (CY + Math.sin(ma) * INNER_CP * p).toFixed(1);
+    d += ` Q${cpx},${cpy} ${next.x.toFixed(1)},${next.y.toFixed(1)}`;
+  }
+  return d + 'Z';
+}
+
+function createBalloonEl(id, color) {
+  const dark  = colorMix(color, 'black', 60);
+  const light = colorMix(color, 'white', 70);
+  const div = document.createElement('div');
+  div.className = 'balloon';
+  div.style.cssText = `width:${W}px;height:${H}px`;
+  div.innerHTML = `<svg viewBox="0 0 680 440" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="pointer-events:none">
+    <defs>
+      <radialGradient id="bg${id}" cx="38%" cy="35%" r="55%">
+        <stop offset="0%"   stop-color="${light}"/>
+        <stop offset="60%"  stop-color="${color}"/>
+        <stop offset="100%" stop-color="${dark}"/>
+      </radialGradient>
+      <radialGradient id="sh${id}" cx="35%" cy="30%" r="30%">
+        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.55"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <g class="body">
+      <ellipse cx="340" cy="210" rx="140" ry="175" fill="url(#bg${id})" style="pointer-events:all;cursor:crosshair"/>
+      <ellipse cx="340" cy="210" rx="140" ry="175" fill="url(#sh${id})" style="pointer-events:none"/>
+      <polygon points="340,375 328,396 352,396" fill="${dark}" style="pointer-events:none"/>
+    </g>
+    <path class="burst" fill="${light}" opacity="0"/>
+  </svg>`;
+  return div;
+}
+
+function spawnBalloon() {
+  const id    = uid++;
+  const color = randomColor();
+  const x     = W / 2 + Math.random() * (window.innerWidth - W);
+  const top   = window.innerHeight + 10;
+
+  const el = createBalloonEl(id, color);
+  el.style.left = (x - W / 2) + 'px';
+  el.style.top  = top + 'px';
+  document.body.appendChild(el);
+
+  const state = { el, top, popping: false };
+  balloons.set(id, state);
+
+  el.querySelector('ellipse').addEventListener('click', () => {
+    if (!state.popping) popBalloon(id);
+  });
+}
+
+function popBalloon(id) {
+  const state = balloons.get(id);
+  if (!state) return;
+  state.popping = true;
+
+  const svg    = state.el.querySelector('svg');
+  const body   = state.el.querySelector('.body');
+  const burst  = state.el.querySelector('.burst');
+  const start  = performance.now();
+
+  (function frame(now) {
+    const t    = Math.min((now - start) / POP_DURATION, 1);
+    const ease = 1 - (1 - t) * (1 - t);
+    burst.setAttribute('d', burstPath(ease));
+    burst.setAttribute('opacity', String(1 - ease));
+    body.setAttribute('opacity',  String(1 - ease));
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      state.el.remove();
+      balloons.delete(id);
+      cFang++; updateCounter();
+      spawnBalloon();
+    }
+  })(start);
+}
+
+function spawnInterval() {
+  //return (window.innerHeight / RISE_SPEED * 1000) / BALLOON_COUNT;
+  return (RISE_SPEED * 10000) / BALLOON_COUNT;
+}
+
+function loop(ts) {
+  const dt = lastTime ? (ts - lastTime) / 1000 : 0;
+  lastTime  = ts;
+
+  // Spawn
+  spawnTimer -= dt * 1000;
+  if (spawnTimer <= 0 && balloons.size < BALLOON_COUNT) {
+    spawnBalloon();
+    spawnTimer = spawnInterval();
+  }
+
+  // Move
+  for (const [id, state] of balloons) {
+    if (state.popping) continue;
+    state.top -= RISE_SPEED * dt;
+    state.el.style.top = state.top + 'px';
+
+    // Ballon am oberen Rand verschwunden → ersetzen
+    if (state.top < -H) {
+      state.el.remove();
+      balloons.delete(id);
+      cFlew++; updateCounter();
+      spawnBalloon();
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// Initiale Füllung
+for (let i = 0; i < BALLOON_COUNT; i++) {
+  setTimeout(spawnBalloon, i * (spawnInterval() / BALLOON_COUNT));
+}
+requestAnimationFrame(loop);
+
+document.addEventListener('contextmenu', e => e.preventDefault());
+</script>
+</body>
+</html>
