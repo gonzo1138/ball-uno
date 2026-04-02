@@ -46,8 +46,8 @@
 <div id="counter">flew: 0<br>fang: 0</div>
 <script>
 // === KONFIGURATION ===
-const BALLOON_COUNT = 20;    // max gleichzeitige Ballons
-const RISE_SPEED    = 50;  // Aufstiegsgeschwindigkeit px/s
+const BALLOON_COUNT = 13;  // max gleichzeitige Ballons
+const RISE_SPEED    = 42;  // Aufstiegsgeschwindigkeit px/s
 // =====================
 
 const W = 200, H = 300;   // dargestellte Ballongröße in px
@@ -58,15 +58,16 @@ const COLORS = [
 ];
 
 // Burst-Parameter
-const SPIKES  = 9;
-const OUTER_R = 155;
-const INNER_CP = 18;
-const POP_DURATION = 555;
-const CX = 340, CY = 210;
+const SPIKES      = 7;
+const INNER_PULL  = 0.25;
+const POP_DURATION = 200;
+
+// Ballon-Ellipse in SVG-Koordinaten
+const EX = 340, EY = 210, ERX = 140, ERY = 175;
 
 let uid = 0;
 const balloons = new Map(); // uid → state
-let spawnTimer = 100;
+let spawnTimer = 0;
 let lastTime   = null;
 let cFlew = 0, cFang = 0;
 
@@ -83,17 +84,30 @@ function colorMix(base, target, pct) {
   return `color-mix(in srgb, ${base} ${pct}%, ${target})`;
 }
 
-function burstPath(p) {
-  const tips = Array.from({ length: SPIKES }, (_, i) => {
-    const a = (i / SPIKES) * Math.PI * 2 - Math.PI / 2;
-    return { x: CX + Math.cos(a) * OUTER_R * p, y: CY + Math.sin(a) * OUTER_R * p };
+function computeTips(ox, oy) {
+  return Array.from({ length: SPIKES }, (_, i) => {
+    const a  = (i / SPIKES) * Math.PI * 2 - Math.PI / 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const dx = ox - EX, dy = oy - EY;
+    const A  = ca*ca/(ERX*ERX) + sa*sa/(ERY*ERY);
+    const B  = 2*(dx*ca/(ERX*ERX) + dy*sa/(ERY*ERY));
+    const C  = dx*dx/(ERX*ERX) + dy*dy/(ERY*ERY) - 1;
+    const disc = B*B - 4*A*C;
+    const t  = disc >= 0 ? (-B + Math.sqrt(disc)) / (2*A) : ERX;
+    return { x: ox + t*ca, y: oy + t*sa };
   });
-  let d = `M${tips[0].x.toFixed(1)},${tips[0].y.toFixed(1)}`;
+}
+
+function burstPath(p, ox, oy, tips) {
+  const pts = tips.map(tip => ({
+    x: ox + (tip.x - ox) * p,
+    y: oy + (tip.y - oy) * p
+  }));
+  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
   for (let i = 0; i < SPIKES; i++) {
-    const next = tips[(i + 1) % SPIKES];
-    const ma = ((i + 0.5) / SPIKES) * Math.PI * 2 - Math.PI / 2;
-    const cpx = (CX + Math.cos(ma) * INNER_CP * p).toFixed(1);
-    const cpy = (CY + Math.sin(ma) * INNER_CP * p).toFixed(1);
+    const next = pts[(i + 1) % SPIKES];
+    const cpx  = (ox + ((pts[i].x + next.x) / 2 - ox) * INNER_PULL * p).toFixed(1);
+    const cpy  = (oy + ((pts[i].y + next.y) / 2 - oy) * INNER_PULL * p).toFixed(1);
     d += ` Q${cpx},${cpy} ${next.x.toFixed(1)},${next.y.toFixed(1)}`;
   }
   return d + 'Z';
@@ -141,12 +155,20 @@ function spawnBalloon() {
   const state = { el, top, popping: false };
   balloons.set(id, state);
 
-  el.querySelector('ellipse').addEventListener('click', () => {
-    if (!state.popping) popBalloon(id);
+  el.querySelector('ellipse').addEventListener('click', (e) => {
+    if (!state.popping) {
+      const svg   = el.querySelector('svg');
+      const rect  = svg.getBoundingClientRect();
+      const scaleX = 680 / rect.width;
+      const scaleY = 440 / rect.height;
+      const ox = (e.clientX - rect.left) * scaleX;
+      const oy = (e.clientY - rect.top)  * scaleY;
+      popBalloon(id, ox, oy);
+    }
   });
 }
 
-function popBalloon(id) {
+function popBalloon(id, ox, oy) {
   const state = balloons.get(id);
   if (!state) return;
   state.popping = true;
@@ -154,12 +176,13 @@ function popBalloon(id) {
   const svg    = state.el.querySelector('svg');
   const body   = state.el.querySelector('.body');
   const burst  = state.el.querySelector('.burst');
-  const start  = performance.now();
+  const tips  = computeTips(ox, oy);
+  const start = performance.now();
 
   (function frame(now) {
     const t    = Math.min((now - start) / POP_DURATION, 1);
     const ease = 1 - (1 - t) * (1 - t);
-    burst.setAttribute('d', burstPath(ease));
+    burst.setAttribute('d', burstPath(ease, ox, oy, tips));
     burst.setAttribute('opacity', String(1 - ease));
     body.setAttribute('opacity',  String(1 - ease));
     if (t < 1) {
