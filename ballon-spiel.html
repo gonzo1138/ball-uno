@@ -15,10 +15,10 @@
       background-color: DeepSkyBlue ; 
       background-image: url("./wolken-hintergrundbild.jpg");
       background-repeat: no-repeat;
-      background-position: 90% top;
-      background-color: rgb(241, 20, 216);
-      width: 100vw; 
-      height: 100vh; 
+      position: fixed; 
+      inset: 0; 
+      width: 100%; 
+      height: 100%;
       cursor: none;
     }
     .balloon { 
@@ -70,6 +70,8 @@ const balloons = new Map(); // uid → state
 let spawnTimer = 0;
 let lastTime   = null;
 let cFlew = 0, cFang = 0;
+let prevW = window.innerWidth;
+let prevH = window.innerHeight;
 
 function updateCounter() {
   document.getElementById('counter').innerHTML = `flew: ${cFlew}<br>fang: ${cFang}`;
@@ -142,27 +144,25 @@ function createBalloonEl(id, color) {
 }
 
 function spawnBalloon() {
-  const id    = uid++;
+  const id   = uid++;
   const color = randomColor();
-  const x     = W / 2 + Math.random() * (window.innerWidth - W);
+  const left  = W / 2 + Math.random() * (window.innerWidth - W);
   const top   = window.innerHeight + 10;
 
   const el = createBalloonEl(id, color);
-  el.style.left = (x - W / 2) + 'px';
+  el.style.left = (left - W / 2) + 'px';
   el.style.top  = top + 'px';
   document.body.appendChild(el);
 
-  const state = { el, top, popping: false };
+  const state = { el, top, left, popping: false };
   balloons.set(id, state);
 
   el.querySelector('ellipse').addEventListener('click', (e) => {
     if (!state.popping) {
-      const svg   = el.querySelector('svg');
-      const rect  = svg.getBoundingClientRect();
-      const scaleX = 680 / rect.width;
-      const scaleY = 440 / rect.height;
-      const ox = (e.clientX - rect.left) * scaleX;
-      const oy = (e.clientY - rect.top)  * scaleY;
+      const svg  = el.querySelector('svg');
+      const rect = svg.getBoundingClientRect();
+      const ox = (e.clientX - rect.left) * (680 / rect.width);
+      const oy = (e.clientY - rect.top)  * (440 / rect.height);
       popBalloon(id, ox, oy);
     }
   });
@@ -173,9 +173,8 @@ function popBalloon(id, ox, oy) {
   if (!state) return;
   state.popping = true;
 
-  const svg    = state.el.querySelector('svg');
-  const body   = state.el.querySelector('.body');
-  const burst  = state.el.querySelector('.burst');
+  const body  = state.el.querySelector('.body');
+  const burst = state.el.querySelector('.burst');
   const tips  = computeTips(ox, oy);
   const start = performance.now();
 
@@ -195,6 +194,27 @@ function popBalloon(id, ox, oy) {
     }
   })(start);
 }
+
+// Debounced resize – 250ms Ruhezeit nach letztem Event
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const newW = window.innerWidth;
+    const newH = window.innerHeight;
+    const sx = newW / prevW;
+    const sy = newH / prevH;
+    for (const state of balloons.values()) {
+      if (state.popping) continue;
+      state.left = Math.min(Math.max(state.left * sx, W / 2), newW - W / 2);
+      state.top  = state.top * sy;
+      state.el.style.left = (state.left - W / 2) + 'px';
+      state.el.style.top  = state.top + 'px';
+    }
+    prevW = newW;
+    prevH = newH;
+  }, 250);
+});
 
 function spawnInterval() {
   //return (window.innerHeight / RISE_SPEED * 1000) / BALLOON_COUNT;
