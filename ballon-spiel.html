@@ -137,14 +137,27 @@ function updateCounter() {
   document.getElementById('counter').innerHTML = `flew: ${cFlew}<br>fang: ${cFang}`;
 }
 
-function randomColor() {
-  return COLORS[Math.floor(Math.random() * COLORS.length)];
-}
-
 function colorMix(base, target, pct) {
   // Returns CSS color-mix string
   return `color-mix(in srgb, ${base} ${pct}%, ${target})`;
 }
+
+// Gradienten einmalig pro Farbe anlegen
+const sharedDefs = document.getElementById('shared-defs');
+COLORS.forEach((color, ci) => {
+  const dark  = colorMix(color, 'black', 60);
+  const light = colorMix(color, 'white', 70);
+  sharedDefs.innerHTML += `
+    <radialGradient id="gbg${ci}" cx="38%" cy="35%" r="55%">
+      <stop offset="0%"   stop-color="${light}"/>
+      <stop offset="60%"  stop-color="${color}"/>
+      <stop offset="100%" stop-color="${dark}"/>
+    </radialGradient>
+    <radialGradient id="gsh${ci}" cx="35%" cy="30%" r="30%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>`;
+});
 
 function computeTips(ox, oy) {
   return Array.from({ length: SPIKES }, (_, i) => {
@@ -175,14 +188,14 @@ function burstPath(p, ox, oy, tips) {
   return d + 'Z';
 }
 
-function createBalloonEl(id, color) {
-  const dark  = colorMix(color, 'black', 60);
-  const light = colorMix(color, 'white', 70);
+function createBalloonEl(ci) {
+  const dark  = colorMix(COLORS[ci], 'black', 60);
+  const light = colorMix(COLORS[ci], 'white', 70);
 
   // Zufällige Wobble-Parameter
   const wamp   = (8 + Math.random() * 28).toFixed(1) + 'px';
   const wdur   = (3 + Math.random() * 5).toFixed(2) + 's';
-  const wdelay = (-Math.random() * 5).toFixed(2) + 's'; // negativer delay = sofort mittendrin
+  const wdelay = (-Math.random() * 5).toFixed(2) + 's';
 
   const outer = document.createElement('div');
   outer.className = 'balloon';
@@ -193,20 +206,9 @@ function createBalloonEl(id, color) {
   inner.style.cssText = `--wamp:${wamp};--wdur:${wdur};--wdelay:${wdelay}`;
 
   inner.innerHTML = `<svg viewBox="0 0 680 440" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="pointer-events:none">
-    <defs>
-      <radialGradient id="bg${id}" cx="38%" cy="35%" r="55%">
-        <stop offset="0%"   stop-color="${light}"/>
-        <stop offset="60%"  stop-color="${color}"/>
-        <stop offset="100%" stop-color="${dark}"/>
-      </radialGradient>
-      <radialGradient id="sh${id}" cx="35%" cy="30%" r="30%">
-        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.55"/>
-        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
     <g class="body">
-      <ellipse cx="340" cy="210" rx="140" ry="175" fill="url(#bg${id})" style="pointer-events:all;cursor:crosshair"/>
-      <ellipse cx="340" cy="210" rx="140" ry="175" fill="url(#sh${id})" style="pointer-events:none"/>
+      <ellipse cx="340" cy="210" rx="140" ry="175" fill="url(#gbg${ci})" style="pointer-events:all;cursor:crosshair"/>
+      <ellipse cx="340" cy="210" rx="140" ry="175" fill="url(#gsh${ci})" style="pointer-events:none"/>
       <polygon points="340,375 328,396 352,396" fill="${dark}" style="pointer-events:none"/>
     </g>
     <path class="burst" fill="${light}" opacity="0"/>
@@ -218,12 +220,12 @@ function createBalloonEl(id, color) {
 
 function spawnBalloon() {
   const id      = uid++;
-  const color   = randomColor();
+  const ci      = Math.floor(Math.random() * COLORS.length);
   const left    = W / 2 + Math.random() * (window.innerWidth - W);
   const top     = window.innerHeight + 10;
   const speedFn = SPEED_FUNS[Math.floor(Math.random() * SPEED_FUNS.length)];
 
-  const el = createBalloonEl(id, color);
+  const el = createBalloonEl(ci);
   el.style.left = (left - W / 2) + 'px';
   el.style.top  = top + 'px';
   document.body.appendChild(el);
@@ -336,6 +338,8 @@ for (let i = 0; i < BALLOON_COUNT; i++) {
 }
 requestAnimationFrame(loop);
 document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+document.addEventListener('touchstart', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 </script>
 </body>
 </html>
